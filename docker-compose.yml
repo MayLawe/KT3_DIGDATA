@@ -1,0 +1,70 @@
+services:
+  minio:
+    image: scnd/minio-mirror:RELEASE.2025-09-07T16-13-09Z
+    container_name: bd-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ./volumes/minio:/data
+
+  mc:
+    image: scnd/mc-mirror:RELEASE.2025-02-04T04-57-50Z
+    container_name: bd-mc
+    depends_on:
+      - minio
+    volumes:
+      - ./data:/data
+    entrypoint: >
+      /bin/sh -c "
+      until /usr/bin/mc alias set local http://minio:9000 minioadmin minioadmin123; do
+        echo 'waiting for minio';
+        sleep 2;
+      done;
+      /usr/bin/mc mb -p local/raw || true;
+      /usr/bin/mc mb -p local/stage || true;
+      /usr/bin/mc mb -p local/curated || true;
+      tail -f /dev/null
+      "
+
+  spark-master:
+    image: spark:4.2.0
+    container_name: bd-spark-master
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.master.Master
+      - --host
+      - spark-master
+      - --port
+      - "7077"
+      - --webui-port
+      - "8080"
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    volumes:
+      - ./data:/data
+
+  spark-worker:
+    image: spark:4.2.0
+    container_name: bd-spark-worker
+    depends_on:
+      - spark-master
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.worker.Worker
+      - spark://spark-master:7077
+      - --cores
+      - "2"
+      - --memory
+      - "2G"
+      - --webui-port
+      - "8081"
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./data:/data
